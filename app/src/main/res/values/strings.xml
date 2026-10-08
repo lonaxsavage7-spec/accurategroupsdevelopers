@@ -1,0 +1,39 @@
+<resources>
+    <string name="app_name">SpaceLens</string>
+    <string name="tab_overview">Storage</string>
+    <string name="tab_cleaner">Cleaner</string>
+    <string name="tab_apps">App Usage</string>
+    <string name="tab_health">Health Score</string>
+    <string name="tab_lens">Smart Advisor</string>
+    
+    <string name="storage_total">Total Storage</string>
+    <string name="storage_used">Used</string>
+    <string name="storage_free">Available</string>
+    <string name="storage_breakdown">Storage Breakdown</string>
+    
+    <string name="category_apps">Apps &amp; Data</string>
+    <string name="category_images">Images</string>
+    <string name="category_videos">Videos</string>
+    <string name="category_audio">Audio &amp; Music</string>
+    <string name="category_docs">Documents</string>
+    <string name="category_apks">APK Packages</string>
+    <string name="category_system">System &amp; Other</string>
+    <string name="category_junk">Junk &amp; Temp</string>
+    
+    <string name="clean_large_files">Large Files</string>
+    <string name="clean_duplicates">Duplicate Files</string>
+    <string name="clean_junk">Cache &amp; Temp Files</string>
+    <string name="clean_unused_apps">Barely Used Apps</string>
+    
+    <string name="health_score_title">Storage Health Score</string>
+    <string name="health_status_good">Optimal</string>
+    <string name="health_status_warning">Attention Needed</string>
+    <string name="health_status_critical">Low Storage Warning</string>
+    
+    <string name="quick_clean_btn">Quick Clean</string>
+    <string name="scan_now_btn">Deep Scan</string>
+    <string name="usage_access_needed">Usage Access Required</string>
+    <string name="usage_access_desc">To track last-used dates and identify unused apps, please enable Usage Access in Settings.</string>
+    <string name="grant_permission">Grant Access</string>
+    <string name="permission_denied">Permission Denied</string>
+</resources>

@@ -1,0 +1,6 @@
+{
+  "name": "SpaceLens",
+  "description": "Storage visualizer, duplicate cleaner, app usage tracker and storage health monitor for Android.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
