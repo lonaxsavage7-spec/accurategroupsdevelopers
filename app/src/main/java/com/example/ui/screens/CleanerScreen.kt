@@ -38,6 +38,11 @@ fun CleanerScreen(
   selectedDuplicateIds: Set<String>,
   onToggleDuplicate: (String) -> Unit,
   onCleanDuplicates: () -> Unit,
+  autoCleanDuplicatesEnabled: Boolean = true,
+  onToggleAutoCleanDuplicates: (Boolean) -> Unit = {},
+  autoCleanRule: DuplicateKeepRule = DuplicateKeepRule.KEEP_OLDEST,
+  onRuleChanged: (DuplicateKeepRule) -> Unit = {},
+  onAutoCleanAllNow: () -> Unit = {},
   largeFiles: List<StorageFileItem>,
   selectedLargeIds: Set<String>,
   onToggleLargeFile: (String) -> Unit,
@@ -121,7 +126,12 @@ fun CleanerScreen(
             groups = duplicateGroups,
             selectedIds = selectedDuplicateIds,
             onToggle = onToggleDuplicate,
-            onClean = onCleanDuplicates
+            onClean = onCleanDuplicates,
+            autoCleanDuplicatesEnabled = autoCleanDuplicatesEnabled,
+            onToggleAutoCleanDuplicates = onToggleAutoCleanDuplicates,
+            autoCleanRule = autoCleanRule,
+            onRuleChanged = onRuleChanged,
+            onAutoCleanAllNow = onAutoCleanAllNow
           )
         }
         CleanerSubTab.LARGE_FILES -> {
@@ -332,22 +342,204 @@ private fun DuplicatesCleanerContent(
   groups: List<DuplicateGroup>,
   selectedIds: Set<String>,
   onToggle: (String) -> Unit,
-  onClean: () -> Unit
+  onClean: () -> Unit,
+  autoCleanDuplicatesEnabled: Boolean,
+  onToggleAutoCleanDuplicates: (Boolean) -> Unit,
+  autoCleanRule: DuplicateKeepRule,
+  onRuleChanged: (DuplicateKeepRule) -> Unit,
+  onAutoCleanAllNow: () -> Unit
 ) {
   val selectedBytes = groups.flatMap { it.items }
     .filter { selectedIds.contains(it.id) }
     .sumOf { it.sizeBytes }
-
-  if (groups.isEmpty()) {
-    EmptyCleanState(
-      title = "No Duplicate Files Found!",
-      description = "SpaceLens found no duplicate videos, photos, or documents wasting storage."
-    )
-    return
-  }
+  val totalDuplicateWaste = groups.sumOf { it.wastedBytes }
 
   Column(modifier = Modifier.fillMaxSize()) {
-    // Header Banner
+    // 1. Auto-Clean Duplicates Control Card
+    Card(
+      shape = RoundedCornerShape(16.dp),
+      colors = CardDefaults.cardColors(containerColor = SpaceDarkSurfaceVariant),
+      modifier = Modifier
+        .fillMaxWidth()
+        .testTag("auto_clean_control_card")
+    ) {
+      Column(
+        modifier = Modifier.padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.weight(1f)
+          ) {
+            Box(
+              contentAlignment = Alignment.Center,
+              modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(if (autoCleanDuplicatesEnabled) EmeraldHealth.copy(alpha = 0.2f) else TextMuted.copy(alpha = 0.15f))
+            ) {
+              Icon(
+                imageVector = Icons.Default.Bolt,
+                contentDescription = null,
+                tint = if (autoCleanDuplicatesEnabled) EmeraldHealth else TextMuted,
+                modifier = Modifier.size(18.dp)
+              )
+            }
+            Column {
+              Text(
+                text = "Auto-Clean Duplicates on Scan",
+                color = TextWhitePrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+              )
+              Text(
+                text = if (autoCleanDuplicatesEnabled) "Active: automatically cleans duplicates when found" else "Disabled: requires manual selection",
+                color = if (autoCleanDuplicatesEnabled) EmeraldLight else TextMuted,
+                fontSize = 11.sp
+              )
+            }
+          }
+
+          Switch(
+            checked = autoCleanDuplicatesEnabled,
+            onCheckedChange = onToggleAutoCleanDuplicates,
+            colors = SwitchDefaults.colors(
+              checkedThumbColor = Color(0xFF003919),
+              checkedTrackColor = EmeraldHealth,
+              uncheckedThumbColor = TextMuted,
+              uncheckedTrackColor = SpaceDarkCard
+            ),
+            modifier = Modifier.testTag("auto_clean_switch")
+          )
+        }
+
+        HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
+
+        // Keep Rule Selector
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          Text(
+            text = "Keep Strategy:",
+            color = TextSubtle,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold
+          )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            DuplicateKeepRule.values().forEach { rule ->
+              val isSelected = autoCleanRule == rule
+              FilterChip(
+                selected = isSelected,
+                onClick = { onRuleChanged(rule) },
+                label = {
+                  Text(
+                    text = rule.label,
+                    fontSize = 11.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                  )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                  selectedContainerColor = CyanAccent.copy(alpha = 0.2f),
+                  selectedLabelColor = CyanAccent,
+                  containerColor = SpaceDarkCard,
+                  labelColor = TextMuted
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                  enabled = true,
+                  selected = isSelected,
+                  borderColor = if (isSelected) CyanAccent else BorderSubtle
+                )
+              )
+            }
+          }
+        }
+
+        // Quick Auto-Clean Button if duplicates present
+        if (groups.isNotEmpty()) {
+          Button(
+            onClick = onAutoCleanAllNow,
+            colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .testTag("auto_clean_now_btn")
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFF001F28), modifier = Modifier.size(16.dp))
+              Text(
+                text = "Auto-Clean All Now (Freed ${StorageScannerHelper.formatBytes(totalDuplicateWaste)})",
+                color = Color(0xFF001F28),
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp
+              )
+            }
+          }
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    if (groups.isEmpty()) {
+      if (autoCleanDuplicatesEnabled) {
+        Box(
+          contentAlignment = Alignment.Center,
+          modifier = Modifier.fillMaxSize()
+        ) {
+          Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(24.dp)
+          ) {
+            Box(
+              contentAlignment = Alignment.Center,
+              modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(EmeraldHealth.copy(alpha = 0.15f))
+            ) {
+              Icon(
+                imageVector = Icons.Default.Bolt,
+                contentDescription = null,
+                tint = EmeraldHealth,
+                modifier = Modifier.size(36.dp)
+              )
+            }
+            Text(
+              text = "Auto-Clean Active",
+              color = TextWhitePrimary,
+              fontWeight = FontWeight.Bold,
+              fontSize = 17.sp
+            )
+            Text(
+              text = "No duplicate files currently on device.\nAny newly detected duplicates will be automatically cleaned on future scans.",
+              color = TextMuted,
+              fontSize = 13.sp,
+              textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+          }
+        }
+      } else {
+        EmptyCleanState(
+          title = "No Duplicate Files Found!",
+          description = "SpaceLens found no duplicate videos, photos, or documents wasting storage."
+        )
+      }
+      return
+    }
+
+    // Header info
     Card(
       shape = RoundedCornerShape(12.dp),
       colors = CardDefaults.cardColors(containerColor = IndigoPrimary.copy(alpha = 0.15f)),
@@ -365,7 +557,7 @@ private fun DuplicatesCleanerContent(
           modifier = Modifier.size(20.dp)
         )
         Text(
-          text = "Smart Recommendation: Keep the original copy and delete identical duplicates.",
+          text = "Rule: ${autoCleanRule.label}. Original file is safely preserved.",
           color = TextWhitePrimary,
           fontSize = 12.sp
         )

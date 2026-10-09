@@ -57,6 +57,11 @@ data class StorageFileItem(
   val extension: String = ""
 )
 
+enum class DuplicateKeepRule(val label: String, val description: String) {
+  KEEP_OLDEST("Keep Oldest Original", "Keeps earliest created file, cleans later duplicates"),
+  KEEP_NEWEST("Keep Newest Copy", "Keeps most recently modified file, cleans older copies")
+}
+
 data class DuplicateGroup(
   val id: String,
   val fileName: String,
@@ -66,6 +71,21 @@ data class DuplicateGroup(
 ) {
   val wastedBytes: Long
     get() = if (items.size > 1) fileSizeBytes * (items.size - 1) else 0L
+
+  fun withKeepRule(rule: DuplicateKeepRule): DuplicateGroup {
+    val sorted = if (rule == DuplicateKeepRule.KEEP_OLDEST) {
+      items.sortedBy { it.lastModified }
+    } else {
+      items.sortedByDescending { it.lastModified }
+    }
+    val updatedItems = sorted.mapIndexed { index, item ->
+      item.copy(isDuplicateOriginal = (index == 0))
+    }
+    return copy(
+      items = updatedItems,
+      recommendedKeepId = updatedItems.firstOrNull()?.id ?: ""
+    )
+  }
 }
 
 data class AppUsageInfo(

@@ -28,6 +28,8 @@ enum class AppFilterOption(val label: String) {
 
 class SpaceLensViewModel(application: Application) : AndroidViewModel(application) {
 
+  private val prefs = getApplication<Application>().getSharedPreferences("spacelens_prefs", Context.MODE_PRIVATE)
+
   private val _isScanning = MutableStateFlow(false)
   val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
@@ -79,6 +81,23 @@ class SpaceLensViewModel(application: Application) : AndroidViewModel(applicatio
   private val _cleanResult = MutableStateFlow<CleanResult?>(null)
   val cleanResult: StateFlow<CleanResult?> = _cleanResult.asStateFlow()
 
+  // Auto-clean duplicates setting (persisted, defaults to true as requested)
+  private val _autoCleanDuplicatesEnabled = MutableStateFlow(
+    prefs.getBoolean("key_auto_clean_duplicates", true)
+  )
+  val autoCleanDuplicatesEnabled: StateFlow<Boolean> = _autoCleanDuplicatesEnabled.asStateFlow()
+
+  // Auto-clean rule (Keep oldest original vs keep newest)
+  private val _autoCleanRule = MutableStateFlow(
+    try {
+      val saved = prefs.getString("key_auto_clean_rule", DuplicateKeepRule.KEEP_OLDEST.name)
+      DuplicateKeepRule.valueOf(saved ?: DuplicateKeepRule.KEEP_OLDEST.name)
+    } catch (_: Exception) {
+      DuplicateKeepRule.KEEP_OLDEST
+    }
+  )
+  val autoCleanRule: StateFlow<DuplicateKeepRule> = _autoCleanRule.asStateFlow()
+
   init {
     startScan()
   }
@@ -107,6 +126,30 @@ class SpaceLensViewModel(application: Application) : AndroidViewModel(applicatio
     _isUsageAccessGranted.value = StorageScannerHelper.hasUsageAccess(getApplication())
   }
 
+  fun setAutoCleanDuplicatesEnabled(enabled: Boolean) {
+    _autoCleanDuplicatesEnabled.value = enabled
+    prefs.edit().putBoolean("key_auto_clean_duplicates", enabled).apply()
+  }
+
+  fun setAutoCleanRule(rule: DuplicateKeepRule) {
+    _autoCleanRule.value = rule
+    prefs.edit().putString("key_auto_clean_rule", rule.name).apply()
+
+    // Re-apply rule to currently displayed duplicate groups
+    val updated = _duplicateGroups.value.map { it.withKeepRule(rule) }
+    _duplicateGroups.value = updated
+
+    val copyIds = mutableSetOf<String>()
+    updated.forEach { group ->
+      group.items.forEach { item ->
+        if (!item.isDuplicateOriginal) {
+          copyIds.add(item.id)
+        }
+      }
+    }
+    _selectedDuplicateIds.value = copyIds
+  }
+
   fun startScan() {
     viewModelScope.launch {
       _isScanning.value = true
@@ -120,42 +163,97 @@ class SpaceLensViewModel(application: Application) : AndroidViewModel(applicatio
 
       _scanProgressMessage.value = "Scanning file system & media..."
       delay(250)
-      val (large, dups, junk) = StorageScannerHelper.scanFilesAndJunk(context)
+      val (large, rawDups, junk) = StorageScannerHelper.scanFilesAndJunk(context)
+      val currentRule = _autoCleanRule.value
+      val dups = rawDups.map { it.withKeepRule(currentRule) }
       _largeFiles.value = large
-      _duplicateGroups.value = dups
       _junkItems.value = junk
 
       // Auto-select all junk items by default
       _selectedJunkIds.value = junk.map { it.id }.toSet()
 
-      // Auto-select duplicate non-original copies by default
-      val copyIds = mutableSetOf<String>()
-      dups.forEach { group ->
-        group.items.forEach { item ->
-          if (!item.isDuplicateOriginal) {
-            copyIds.add(item.id)
-          }
-        }
-      }
-      _selectedDuplicateIds.value = copyIds
-
+      // Inspect applications
       _scanProgressMessage.value = "Inspecting installed applications & usage..."
-      delay(250)
+      delay(200)
       val apps = StorageScannerHelper.scanInstalledApps(context)
       _appUsageList.value = apps
 
+      // Check Auto-Clean Duplicates setting
+      if (_autoCleanDuplicatesEnabled.value && dups.isNotEmpty()) {
+        _scanProgressMessage.value = "⚡ Auto-cleaning ${dups.size} duplicate file groups..."
+        delay(250)
+        performAutoCleanDuplicates(dups, currentRule, isAutomatic = true)
+      } else {
+        _duplicateGroups.value = dups
+        // Auto-select duplicate non-original copies by default
+        val copyIds = mutableSetOf<String>()
+        dups.forEach { group ->
+          group.items.forEach { item ->
+            if (!item.isDuplicateOriginal) {
+              copyIds.add(item.id)
+            }
+          }
+        }
+        _selectedDuplicateIds.value = copyIds
+      }
+
       _scanProgressMessage.value = "Calculating Storage Health Score..."
       delay(150)
-      val health = StorageScannerHelper.calculateStorageHealth(
-        breakdown = breakdown,
-        duplicateGroups = dups,
-        unusedApps = apps,
-        junkItems = junk,
-        largeFiles = large
-      )
-      _healthScore.value = health
+      refreshHealth()
 
       _isScanning.value = false
+    }
+  }
+
+  private suspend fun performAutoCleanDuplicates(
+    groups: List<DuplicateGroup>,
+    rule: DuplicateKeepRule,
+    isAutomatic: Boolean = false
+  ) {
+    if (groups.isEmpty()) return
+
+    var reclaimedBytes = 0L
+    var deletedCount = 0
+
+    groups.forEach { rawGroup ->
+      val group = rawGroup.withKeepRule(rule)
+      group.items.forEach { item ->
+        if (!item.isDuplicateOriginal) {
+          reclaimedBytes += item.sizeBytes
+          deletedCount++
+          try {
+            val f = File(item.path)
+            if (f.exists()) f.delete()
+          } catch (_: Exception) {}
+        }
+      }
+    }
+
+    _duplicateGroups.value = emptyList()
+    _selectedDuplicateIds.value = emptySet()
+
+    // Update storage breakdown
+    val currentBreakdown = _storageBreakdown.value
+    val newFree = currentBreakdown.freeBytes + reclaimedBytes
+    val newUsed = (currentBreakdown.usedBytes - reclaimedBytes).coerceAtLeast(0L)
+    _storageBreakdown.value = currentBreakdown.copy(
+      freeBytes = newFree,
+      usedBytes = newUsed
+    )
+
+    refreshHealth()
+
+    val prefix = if (isAutomatic) "⚡ Auto-Clean Triggered:" else "Cleaned"
+    _cleanResult.value = CleanResult(
+      filesDeletedCount = deletedCount,
+      bytesReclaimed = reclaimedBytes,
+      message = "$prefix Safely removed $deletedCount duplicate copies and freed ${StorageScannerHelper.formatBytes(reclaimedBytes)} automatically!"
+    )
+  }
+
+  fun autoCleanAllDuplicatesNow() {
+    viewModelScope.launch {
+      performAutoCleanDuplicates(_duplicateGroups.value, _autoCleanRule.value, isAutomatic = false)
     }
   }
 
@@ -222,12 +320,10 @@ class SpaceLensViewModel(application: Application) : AndroidViewModel(applicatio
         } catch (_: Exception) {}
       }
 
-      // Update remaining junk items
       val remaining = _junkItems.value.filterNot { selectedIds.contains(it.id) }
       _junkItems.value = remaining
       _selectedJunkIds.value = emptySet()
 
-      // Update storage breakdown
       val currentBreakdown = _storageBreakdown.value
       val newFree = currentBreakdown.freeBytes + reclaimedBytes
       val newUsed = (currentBreakdown.usedBytes - reclaimedBytes).coerceAtLeast(0L)
@@ -259,7 +355,6 @@ class SpaceLensViewModel(application: Application) : AndroidViewModel(applicatio
       var reclaimedBytes = 0L
       var deletedCount = 0
 
-      // Identify items to delete
       val itemsToDelete = mutableListOf<StorageFileItem>()
       _duplicateGroups.value.forEach { group ->
         group.items.forEach { item ->
@@ -278,7 +373,6 @@ class SpaceLensViewModel(application: Application) : AndroidViewModel(applicatio
         } catch (_: Exception) {}
       }
 
-      // Recompute duplicate groups
       val remainingGroups = mutableListOf<DuplicateGroup>()
       _duplicateGroups.value.forEach { group ->
         val remainingItems = group.items.filterNot { selectedIds.contains(it.id) }
@@ -290,7 +384,6 @@ class SpaceLensViewModel(application: Application) : AndroidViewModel(applicatio
       _duplicateGroups.value = remainingGroups
       _selectedDuplicateIds.value = emptySet()
 
-      // Update storage breakdown
       val currentBreakdown = _storageBreakdown.value
       val newFree = currentBreakdown.freeBytes + reclaimedBytes
       val newUsed = (currentBreakdown.usedBytes - reclaimedBytes).coerceAtLeast(0L)

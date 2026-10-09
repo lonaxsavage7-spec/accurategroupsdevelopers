@@ -56,6 +56,8 @@ fun SpaceLensApp(
   val isUsageAccessGranted by viewModel.isUsageAccessGranted.collectAsStateWithLifecycle()
   val appFilter by viewModel.appFilter.collectAsStateWithLifecycle()
   val appSearchQuery by viewModel.appSearchQuery.collectAsStateWithLifecycle()
+  val autoCleanDuplicatesEnabled by viewModel.autoCleanDuplicatesEnabled.collectAsStateWithLifecycle()
+  val autoCleanRule by viewModel.autoCleanRule.collectAsStateWithLifecycle()
 
   var showOptionsMenu by remember { mutableStateOf(false) }
 
@@ -148,6 +150,34 @@ fun SpaceLensApp(
               onDismissRequest = { showOptionsMenu = false },
               modifier = Modifier.background(SpaceDarkSurface)
             ) {
+              DropdownMenuItem(
+                text = {
+                  Text(
+                    text = "Auto-Clean Duplicates: ${if (autoCleanDuplicatesEnabled) "ON" else "OFF"}",
+                    color = TextWhitePrimary,
+                    fontSize = 13.sp
+                  )
+                },
+                leadingIcon = {
+                  Icon(
+                    Icons.Default.Bolt,
+                    contentDescription = null,
+                    tint = if (autoCleanDuplicatesEnabled) EmeraldHealth else TextMuted
+                  )
+                },
+                onClick = {
+                  showOptionsMenu = false
+                  viewModel.setAutoCleanDuplicatesEnabled(!autoCleanDuplicatesEnabled)
+                }
+              )
+              DropdownMenuItem(
+                text = { Text("Auto-Clean Duplicates Now", color = TextWhitePrimary, fontSize = 13.sp) },
+                leadingIcon = { Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = CyanAccent) },
+                onClick = {
+                  showOptionsMenu = false
+                  viewModel.autoCleanAllDuplicatesNow()
+                }
+              )
               DropdownMenuItem(
                 text = { Text("Generate Test Sandbox Data", color = TextWhitePrimary, fontSize = 13.sp) },
                 leadingIcon = { Icon(Icons.Default.Build, contentDescription = null, tint = CyanAccent) },
@@ -246,6 +276,11 @@ fun SpaceLensApp(
             selectedDuplicateIds = selectedDuplicateIds,
             onToggleDuplicate = { viewModel.toggleDuplicateSelection(it) },
             onCleanDuplicates = { viewModel.deleteSelectedDuplicates() },
+            autoCleanDuplicatesEnabled = autoCleanDuplicatesEnabled,
+            onToggleAutoCleanDuplicates = { viewModel.setAutoCleanDuplicatesEnabled(it) },
+            autoCleanRule = autoCleanRule,
+            onRuleChanged = { viewModel.setAutoCleanRule(it) },
+            onAutoCleanAllNow = { viewModel.autoCleanAllDuplicatesNow() },
             largeFiles = largeFiles,
             selectedLargeIds = selectedLargeIds,
             onToggleLargeFile = { viewModel.toggleLargeFileSelection(it) },
